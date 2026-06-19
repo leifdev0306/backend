@@ -90,8 +90,8 @@ AUTH_PASSWORD_VALIDATORS = [
 
 # Internationalization
 LANGUAGE_CODE = 'es-es'
-TIME_ZONE = 'America/Havana'
 USE_I18N = True
+TIME_ZONE = 'America/Havana'
 USE_TZ = True
 
 # Static files (CSS, JavaScript, Images)
