@@ -6,10 +6,11 @@ class ViajesConfig(AppConfig):
     name = 'viajes'
 
     def ready(self):
-        # Solo ejecutar en Render (o cuando RENDER=True)
         if os.environ.get('RENDER'):
             try:
                 from django.core.management import call_command
+                print("Generando migraciones para viajes...")
+                call_command('makemigrations', 'viajes', interactive=False)
                 print("Ejecutando migraciones pendientes...")
                 call_command('migrate', interactive=False)
 
@@ -22,4 +23,4 @@ class ViajesConfig(AppConfig):
                     print(f"Creando superusuario: {username}")
                     User.objects.create_superuser(username, email, password)
             except Exception as e:
-                print(f"Error durante configuración inicial: {e}")
+                print(f"Error: {e}")
