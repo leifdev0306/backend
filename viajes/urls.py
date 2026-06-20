@@ -3,7 +3,7 @@ from rest_framework.routers import DefaultRouter
 from .views import (
     ProvinciaViewSet, ViajeViewSet, GestorViewSet,
     EntidadViewSet, LiquidacionMensualViewSet, PuntuacionViewSet,
-    AdminStatsViewSet, health_check
+    AdminStatsViewSet
 )
 
 router = DefaultRouter()
@@ -25,5 +25,4 @@ urlpatterns = [
     path('admin/detalle-mensual/', AdminStatsViewSet.as_view({'get': 'detalle_mensual'}), name='admin-detalle-mensual'),
     path('admin/entidades/<int:pk>/suspender/', AdminStatsViewSet.as_view({'post': 'suspender_entidad'}), name='admin-entidad-suspender'),
     path('admin/entidades/<int:pk>/activar/', AdminStatsViewSet.as_view({'post': 'activar_entidad'}), name='admin-entidad-activar'),
-    path('health/', health_check, name='health_check'),
 ]

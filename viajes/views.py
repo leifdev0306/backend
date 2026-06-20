@@ -17,7 +17,9 @@ from .permissions import IsGestor, IsAdmin
 from .utils import actualizar_liquidacion
 
 
+# ==================== HEALTH CHECK ====================
 def health_check(request):
+    """Endpoint para verificar que el servidor está activo"""
     return JsonResponse({"status": "ok", "timestamp": datetime.now().isoformat()})
 
 
@@ -171,10 +173,8 @@ class EntidadViewSet(viewsets.ModelViewSet):
     parser_classes = (parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser)
 
     def get_permissions(self):
-        # Permitir a gestores acceder a su propia entidad
         if self.action == 'mi_entidad':
             return [permissions.IsAuthenticated()]
-        # Permitir PATCH/PUT solo a gestores (para su entidad) o admin
         if self.request.method in ['PUT', 'PATCH'] and self.action not in ['create', 'destroy']:
             return [permissions.IsAuthenticated()]
         return [IsAdmin()]
