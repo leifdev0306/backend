@@ -4,6 +4,7 @@ from rest_framework.response import Response
 from django.db.models import Q, Sum, Count, Avg
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import PermissionDenied
+from django.utils import timezone  # 👈 NUEVO IMPORT
 from datetime import datetime, date
 from .models import Provincia, Viaje, Pasajero, Entidad, Gestor, LiquidacionMensual, Puntuacion
 from .serializers import (
@@ -57,7 +58,7 @@ class ViajeViewSet(viewsets.ModelViewSet):
     def listar_activos(self, request):
         origen = request.query_params.get('origen')
         destino = request.query_params.get('destino')
-        ahora = datetime.now()
+        ahora = timezone.now()  # 👈 CAMBIO: usa timezone.now() en lugar de datetime.now()
         qs = Viaje.objects.filter(
             estado__in=['activo', 'lleno'],
             entidad__suspendida=False,
@@ -133,7 +134,7 @@ class ViajeViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Solo se puede completar un viaje en curso'}, status=status.HTTP_400_BAD_REQUEST)
         viaje.estado = 'completado'
         viaje.save(update_fields=['estado'])
-        actualizar_liquidacion(viaje)  # actualiza liquidación del mes del viaje
+        actualizar_liquidacion(viaje)
         return Response({'status': 'completado'})
 
     @action(detail=True, methods=['post'], permission_classes=[IsGestor])
@@ -220,12 +221,10 @@ class LiquidacionMensualViewSet(viewsets.ModelViewSet):
         return Response({'status': 'no pagada, entidad suspendida'})
 
 
-# ==================== ADMIN STATS (MEJORADO) ====================
 class AdminStatsViewSet(viewsets.ViewSet):
     permission_classes = [IsAdmin]
 
     def list(self, request):
-        """Resumen general del sistema"""
         total_ingresos = LiquidacionMensual.objects.aggregate(Sum('ingresos_totales'))['ingresos_totales__sum'] or 0
         total_comision = LiquidacionMensual.objects.aggregate(Sum('comision'))['comision__sum'] or 0
         total_pasajeros = LiquidacionMensual.objects.aggregate(Sum('total_pasajeros'))['total_pasajeros__sum'] or 0
@@ -234,11 +233,9 @@ class AdminStatsViewSet(viewsets.ViewSet):
         total_gestores = Gestor.objects.count()
         entidades_suspendidas = entidades.filter(suspendida=True).count()
 
-        # Viajes activos hoy
         hoy = date.today()
         viajes_hoy = Viaje.objects.filter(fecha=hoy, estado__in=['activo', 'lleno']).count()
 
-        # Últimos 6 meses de ingresos
         ultimos_meses = []
         for i in range(6):
             mes = hoy.month - i
@@ -273,7 +270,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'], url_path='entidades-resumen')
     def entidades_resumen(self, request):
-        """Resumen de cada entidad con sus métricas agregadas"""
         entidades = Entidad.objects.all()
         resultado = []
         for entidad in entidades:
@@ -304,7 +300,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
 
     @action(detail=False, methods=['get'], url_path='detalle-mensual')
     def detalle_mensual(self, request):
-        """Estadísticas detalladas de un mes específico (por defecto mes actual)"""
         año = request.query_params.get('año')
         mes = request.query_params.get('mes')
         hoy = date.today()
@@ -314,7 +309,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
         año = int(año)
         mes = int(mes)
 
-        # Viajes completados en ese mes (por fecha de viaje)
         viajes_mes = Viaje.objects.filter(
             estado='completado',
             fecha__year=año,
@@ -324,7 +318,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
         total_pasajeros = viajes_mes.aggregate(Sum('pasajeros_count'))['pasajeros_count__sum'] or 0
         total_viajes = viajes_mes.count()
 
-        # Desglose por entidad
         entidades_data = []
         for entidad in Entidad.objects.all():
             viajes_entidad = viajes_mes.filter(entidad=entidad)
@@ -337,7 +330,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
                     'pasajeros': viajes_entidad.aggregate(Sum('pasajeros_count'))['pasajeros_count__sum'] or 0,
                 })
 
-        # Liquidaciones pagadas/no pagadas
         liquidaciones = LiquidacionMensual.objects.filter(año=año, mes=mes)
         pagadas = liquidaciones.filter(pagada=True).count()
         no_pagadas = liquidaciones.filter(pagada=False).count()
@@ -368,7 +360,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
         return Response({'status': 'activada'})
 
 
-# ==================== PUNTUACIONES ====================
 class PuntuacionViewSet(viewsets.ModelViewSet):
     queryset = Puntuacion.objects.all()
     serializer_class = PuntuacionSerializer
