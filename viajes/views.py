@@ -1,10 +1,9 @@
-# viajes/views.py
-
 from rest_framework import viewsets, status, permissions
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Q, Sum, Count
 from django.shortcuts import get_object_or_404
+from django.core.exceptions import PermissionDenied
 from datetime import datetime, date
 from .models import Provincia, Viaje, Pasajero, Entidad, Gestor, LiquidacionMensual, Puntuacion
 from .serializers import (
@@ -71,7 +70,6 @@ class ViajeViewSet(viewsets.ModelViewSet):
         if destino:
             qs = qs.filter(destino_id=destino)
         serializer = self.get_serializer(qs, many=True)
-        # Añadir puntuación de la entidad (ya incluida en el serializador)
         return Response(serializer.data)
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.AllowAny])
@@ -164,7 +162,39 @@ class GestorViewSet(viewsets.ModelViewSet):
 class EntidadViewSet(viewsets.ModelViewSet):
     queryset = Entidad.objects.all()
     serializer_class = EntidadSerializer
-    permission_classes = [IsAdmin]
+
+    def get_permissions(self):
+        if self.action == 'mi_entidad':
+            return [permissions.IsAuthenticated()]
+        if self.request.method in ['GET', 'PUT', 'PATCH']:
+            # Permitir gestores ver y actualizar su entidad
+            return [permissions.IsAuthenticated()]
+        return [IsAdmin()]
+
+    def get_queryset(self):
+        user = self.request.user
+        if user.is_staff:
+            return Entidad.objects.all()
+        if hasattr(user, 'gestor'):
+            return Entidad.objects.filter(id=user.gestor.entidad.id)
+        return Entidad.objects.none()
+
+    def perform_update(self, serializer):
+        user = self.request.user
+        if hasattr(user, 'gestor'):
+            entidad = user.gestor.entidad
+            if serializer.instance.id != entidad.id:
+                raise PermissionDenied("No puedes modificar otra entidad")
+        serializer.save()
+
+    @action(detail=False, methods=['get'], permission_classes=[permissions.IsAuthenticated])
+    def mi_entidad(self, request):
+        user = request.user
+        if hasattr(user, 'gestor'):
+            entidad = user.gestor.entidad
+            serializer = self.get_serializer(entidad)
+            return Response(serializer.data)
+        return Response({'error': 'No eres gestor'}, status=status.HTTP_403_FORBIDDEN)
 
 
 class LiquidacionMensualViewSet(viewsets.ModelViewSet):

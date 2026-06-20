@@ -13,7 +13,8 @@ class Entidad(models.Model):
     comision_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
     suspendida = models.BooleanField(default=False)
     creada = models.DateTimeField(auto_now_add=True)
-    puntuacion_promedio = models.FloatField(default=0.0)  # Promedio de estrellas (0-5)
+    puntuacion_promedio = models.FloatField(default=0.0)
+    imagen_promocional = models.URLField(max_length=500, blank=True, null=True)
 
     def recalcular_puntuacion(self):
         from .models import Puntuacion
