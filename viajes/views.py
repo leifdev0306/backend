@@ -4,7 +4,8 @@ from rest_framework.response import Response
 from django.db.models import Q, Sum, Count, Avg
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import PermissionDenied
-from django.utils import timezone  # 👈 NUEVO IMPORT
+from django.utils import timezone
+from django.http import JsonResponse  # 👈 PARA HEALTH CHECK
 from datetime import datetime, date
 from .models import Provincia, Viaje, Pasajero, Entidad, Gestor, LiquidacionMensual, Puntuacion
 from .serializers import (
@@ -14,10 +15,12 @@ from .serializers import (
 )
 from .permissions import IsGestor, IsAdmin
 from .utils import actualizar_liquidacion
-from django.http import JsonResponse
 
+
+# ==================== HEALTH CHECK ====================
 def health_check(request):
-    return JsonResponse({"status": "ok"})
+    """Endpoint para verificar que el servidor está activo (usado por cron-job.org)"""
+    return JsonResponse({"status": "ok", "timestamp": datetime.now().isoformat()})
 
 
 class ProvinciaViewSet(viewsets.ReadOnlyModelViewSet):
@@ -62,7 +65,7 @@ class ViajeViewSet(viewsets.ModelViewSet):
     def listar_activos(self, request):
         origen = request.query_params.get('origen')
         destino = request.query_params.get('destino')
-        ahora = timezone.now()  # 👈 CAMBIO: usa timezone.now() en lugar de datetime.now()
+        ahora = timezone.now()
         qs = Viaje.objects.filter(
             estado__in=['activo', 'lleno'],
             entidad__suspendida=False,
@@ -408,4 +411,3 @@ class PuntuacionViewSet(viewsets.ModelViewSet):
         viaje.entidad.recalcular_puntuacion()
         serializer = PuntuacionSerializer(puntuacion)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
-        
