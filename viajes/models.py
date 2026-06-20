@@ -14,7 +14,7 @@ class Entidad(models.Model):
     suspendida = models.BooleanField(default=False)
     creada = models.DateTimeField(auto_now_add=True)
     puntuacion_promedio = models.FloatField(default=0.0)
-    imagen_promocional = models.URLField(max_length=500, blank=True, null=True)
+    imagen_promocional = models.ImageField(upload_to='entidades/', blank=True, null=True)  # NUEVO
 
     def recalcular_puntuacion(self):
         from .models import Puntuacion

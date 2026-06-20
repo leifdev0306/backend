@@ -23,4 +23,4 @@ class ViajesConfig(AppConfig):
                     print(f"Creando superusuario: {username}")
                     User.objects.create_superuser(username, email, password)
             except Exception as e:
-                print(f"Error: {e}")
+                print(f"Error en migración: {e}")

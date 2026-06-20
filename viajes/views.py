@@ -1,4 +1,4 @@
-from rest_framework import viewsets, status, permissions
+from rest_framework import viewsets, status, permissions, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from django.db.models import Q, Sum, Count
@@ -162,12 +162,12 @@ class GestorViewSet(viewsets.ModelViewSet):
 class EntidadViewSet(viewsets.ModelViewSet):
     queryset = Entidad.objects.all()
     serializer_class = EntidadSerializer
+    parser_classes = (parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser)  # NUEVO
 
     def get_permissions(self):
         if self.action == 'mi_entidad':
             return [permissions.IsAuthenticated()]
         if self.request.method in ['GET', 'PUT', 'PATCH']:
-            # Permitir gestores ver y actualizar su entidad
             return [permissions.IsAuthenticated()]
         return [IsAdmin()]
 
@@ -220,7 +220,6 @@ class LiquidacionMensualViewSet(viewsets.ModelViewSet):
         return Response({'status': 'no pagada, entidad suspendida'})
 
 
-# ==================== VISTAS PARA ADMINISTRADOR (ESTADÍSTICAS) ====================
 class AdminStatsViewSet(viewsets.ViewSet):
     permission_classes = [IsAdmin]
 
@@ -297,7 +296,6 @@ class AdminStatsViewSet(viewsets.ViewSet):
         return Response({'status': 'activada'})
 
 
-# ==================== VISTAS PARA PUNTUACIONES ====================
 class PuntuacionViewSet(viewsets.ModelViewSet):
     queryset = Puntuacion.objects.all()
     serializer_class = PuntuacionSerializer

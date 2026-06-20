@@ -11,7 +11,6 @@ class EntidadSerializer(serializers.ModelSerializer):
     class Meta:
         model = Entidad
         fields = '__all__'
-        read_only_fields = ['puntuacion_promedio']
 
 class ViajeSerializer(serializers.ModelSerializer):
     origen_nombre = serializers.ReadOnlyField(source='origen.nombre')
@@ -20,7 +19,7 @@ class ViajeSerializer(serializers.ModelSerializer):
     pasajeros_count = serializers.ReadOnlyField()
     entidad_nombre = serializers.ReadOnlyField(source='entidad.nombre')
     entidad_puntuacion = serializers.SerializerMethodField()
-    entidad_imagen_promocional = serializers.ReadOnlyField(source='entidad.imagen_promocional')
+    entidad_imagen_promocional = serializers.ReadOnlyField(source='entidad.imagen_promocional')  # NUEVO
 
     class Meta:
         model = Viaje
