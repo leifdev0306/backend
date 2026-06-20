@@ -31,6 +31,9 @@ class ViajeSerializer(serializers.ModelSerializer):
 
     def get_entidad_imagen_promocional(self, obj):
         if obj.entidad.imagen_promocional:
+            request = self.context.get('request')
+            if request:
+                return request.build_absolute_uri(obj.entidad.imagen_promocional.url)
             return obj.entidad.imagen_promocional.url
         return None
 

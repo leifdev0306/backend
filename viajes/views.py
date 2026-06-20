@@ -5,7 +5,7 @@ from django.db.models import Q, Sum, Count, Avg
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import PermissionDenied
 from django.utils import timezone
-from django.http import JsonResponse  # 👈 PARA HEALTH CHECK
+from django.http import JsonResponse
 from datetime import datetime, date
 from .models import Provincia, Viaje, Pasajero, Entidad, Gestor, LiquidacionMensual, Puntuacion
 from .serializers import (
@@ -17,9 +17,7 @@ from .permissions import IsGestor, IsAdmin
 from .utils import actualizar_liquidacion
 
 
-# ==================== HEALTH CHECK ====================
 def health_check(request):
-    """Endpoint para verificar que el servidor está activo (usado por cron-job.org)"""
     return JsonResponse({"status": "ok", "timestamp": datetime.now().isoformat()})
 
 
@@ -173,9 +171,11 @@ class EntidadViewSet(viewsets.ModelViewSet):
     parser_classes = (parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser)
 
     def get_permissions(self):
+        # Permitir a gestores acceder a su propia entidad
         if self.action == 'mi_entidad':
             return [permissions.IsAuthenticated()]
-        if self.request.method in ['GET', 'PUT', 'PATCH']:
+        # Permitir PATCH/PUT solo a gestores (para su entidad) o admin
+        if self.request.method in ['PUT', 'PATCH'] and self.action not in ['create', 'destroy']:
             return [permissions.IsAuthenticated()]
         return [IsAdmin()]
 
@@ -200,7 +200,7 @@ class EntidadViewSet(viewsets.ModelViewSet):
         user = request.user
         if hasattr(user, 'gestor'):
             entidad = user.gestor.entidad
-            serializer = self.get_serializer(entidad)
+            serializer = self.get_serializer(entidad, context={'request': request})
             return Response(serializer.data)
         return Response({'error': 'No eres gestor'}, status=status.HTTP_403_FORBIDDEN)
 
@@ -383,7 +383,7 @@ class PuntuacionViewSet(viewsets.ModelViewSet):
         ).exclude(
             puntuaciones__ci_cliente=ci
         ).distinct()
-        serializer = ViajeSerializer(viajes_completados, many=True)
+        serializer = ViajeSerializer(viajes_completados, many=True, context={'request': request})
         return Response(serializer.data)
 
     @action(detail=False, methods=['post'], url_path='calificar')
