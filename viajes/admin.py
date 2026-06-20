@@ -8,7 +8,7 @@ class ProvinciaAdmin(admin.ModelAdmin):
 
 @admin.register(Entidad)
 class EntidadAdmin(admin.ModelAdmin):
-    list_display = ('id', 'nombre', 'telefono', 'suspendida', 'puntuacion_promedio')
+    list_display = ('id', 'nombre', 'telefono', 'suspendida', 'puntuacion_promedio')  # Sin imagen_promocional
     list_filter = ('suspendida',)
     search_fields = ('nombre', 'telefono')
 

@@ -8,26 +8,23 @@ class ViajesConfig(AppConfig):
     def ready(self):
         if os.environ.get('RENDER'):
             try:
-                from django.core.management import call_command
                 from django.db import connection
+                from django.contrib.auth import get_user_model
 
-                # Verificar si la columna imagen_promocional existe
+                # Verificar y crear columna imagen_promocional si no existe
                 with connection.cursor() as cursor:
                     cursor.execute("""
-                        SELECT column_name
-                        FROM information_schema.columns
-                        WHERE table_name='viajes_entidad' AND column_name='imagen_promocional'
+                        DO $$
+                        BEGIN
+                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
+                                           WHERE table_name='viajes_entidad' AND column_name='imagen_promocional') THEN
+                                ALTER TABLE viajes_entidad ADD COLUMN imagen_promocional varchar(500);
+                            END IF;
+                        END $$;
                     """)
-                    exists = cursor.fetchone()
-
-                if not exists:
-                    print("🔧 Forzando creación de columna imagen_promocional...")
-                    call_command('makemigrations', 'viajes', interactive=False)
-                    call_command('migrate', interactive=False)
-                    print("✅ Migración completada")
+                    print("✅ Columna imagen_promocional verificada/creada")
 
                 # Crear superusuario si no existe
-                from django.contrib.auth import get_user_model
                 User = get_user_model()
                 if not User.objects.filter(is_superuser=True).exists():
                     username = os.environ.get('DJANGO_SUPERUSER_USERNAME', 'admin')
