@@ -14,6 +14,10 @@ from .serializers import (
 )
 from .permissions import IsGestor, IsAdmin
 from .utils import actualizar_liquidacion
+from django.http import JsonResponse
+
+def health_check(request):
+    return JsonResponse({"status": "ok"})
 
 
 class ProvinciaViewSet(viewsets.ReadOnlyModelViewSet):
@@ -404,3 +408,4 @@ class PuntuacionViewSet(viewsets.ModelViewSet):
         viaje.entidad.recalcular_puntuacion()
         serializer = PuntuacionSerializer(puntuacion)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
+        
