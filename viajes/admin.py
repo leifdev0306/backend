@@ -1,14 +1,11 @@
 from django.contrib import admin
 from .models import Provincia, Entidad, Gestor, Viaje, Pasajero, Puntuacion, LiquidacionMensual
 
-# Registrar el modelo Provincia para que aparezca en el admin
 @admin.register(Provincia)
 class ProvinciaAdmin(admin.ModelAdmin):
     list_display = ('id', 'nombre')
     search_fields = ('nombre',)
-    ordering = ('nombre',)
 
-# Registrar el resto de modelos (opcional pero recomendado)
 @admin.register(Entidad)
 class EntidadAdmin(admin.ModelAdmin):
     list_display = ('id', 'nombre', 'telefono', 'suspendida', 'puntuacion_promedio')
@@ -19,14 +16,13 @@ class EntidadAdmin(admin.ModelAdmin):
 class GestorAdmin(admin.ModelAdmin):
     list_display = ('id', 'user', 'entidad')
     list_filter = ('entidad',)
-    search_fields = ('user__username', 'user__email')
+    search_fields = ('user__username',)
 
 @admin.register(Viaje)
 class ViajeAdmin(admin.ModelAdmin):
     list_display = ('id', 'entidad', 'origen', 'destino', 'fecha', 'hora', 'estado', 'cupos_disponibles')
     list_filter = ('entidad', 'origen', 'destino', 'estado')
-    search_fields = ('entidad__nombre', 'origen__nombre', 'destino__nombre', 'matricula')
-    readonly_fields = ('creado',)
+    search_fields = ('entidad__nombre', 'matricula')
 
 @admin.register(Pasajero)
 class PasajeroAdmin(admin.ModelAdmin):
@@ -42,5 +38,6 @@ class PuntuacionAdmin(admin.ModelAdmin):
 
 @admin.register(LiquidacionMensual)
 class LiquidacionMensualAdmin(admin.ModelAdmin):
-    list_display = ('id', 'entidad', 'año', 'mes', 'ingresos_totales', 'comision', 'pagada')
+    list_display = ('id', 'entidad', 'año', 'mes', 'ingresos_totales', 'comision', 'total_pasajeros', 'total_viajes_completados', 'pagada')
     list_filter = ('entidad', 'año', 'mes', 'pagada')
+    search_fields = ('entidad__nombre',)

@@ -19,7 +19,7 @@ class ViajeSerializer(serializers.ModelSerializer):
     pasajeros_count = serializers.ReadOnlyField()
     entidad_nombre = serializers.ReadOnlyField(source='entidad.nombre')
     entidad_puntuacion = serializers.SerializerMethodField()
-    entidad_imagen_promocional = serializers.ReadOnlyField(source='entidad.imagen_promocional')  # NUEVO
+    entidad_imagen_promocional = serializers.SerializerMethodField()
 
     class Meta:
         model = Viaje
@@ -29,6 +29,11 @@ class ViajeSerializer(serializers.ModelSerializer):
     def get_entidad_puntuacion(self, obj):
         return obj.entidad.puntuacion_promedio
 
+    def get_entidad_imagen_promocional(self, obj):
+        if obj.entidad.imagen_promocional:
+            return obj.entidad.imagen_promocional.url
+        return None
+
 class PasajeroSerializer(serializers.ModelSerializer):
     class Meta:
         model = Pasajero
@@ -37,9 +42,11 @@ class PasajeroSerializer(serializers.ModelSerializer):
 class GestorSerializer(serializers.ModelSerializer):
     username = serializers.CharField(write_only=True)
     password = serializers.CharField(write_only=True)
+
     class Meta:
         model = Gestor
         fields = ['id', 'entidad', 'username', 'password']
+
     def create(self, validated_data):
         username = validated_data.pop('username')
         password = validated_data.pop('password')
@@ -48,10 +55,11 @@ class GestorSerializer(serializers.ModelSerializer):
 
 class LiquidacionMensualSerializer(serializers.ModelSerializer):
     entidad_nombre = serializers.ReadOnlyField(source='entidad.nombre')
+
     class Meta:
         model = LiquidacionMensual
         fields = '__all__'
-        read_only_fields = ['ingresos_totales', 'comision']
+        read_only_fields = ['ingresos_totales', 'comision', 'total_pasajeros', 'total_viajes_completados']
 
 class PuntuacionSerializer(serializers.ModelSerializer):
     class Meta:

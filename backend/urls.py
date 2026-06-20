@@ -11,6 +11,5 @@ urlpatterns = [
     path('api/', include('viajes.urls')),
 ]
 
-# Servir archivos de media en desarrollo (en producción, usa un servicio como Cloudinary)
-if settings.DEBUG:
-    urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)
+# Servir archivos multimedia en producción (Render)
+urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

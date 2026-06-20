@@ -1,7 +1,7 @@
 from rest_framework import viewsets, status, permissions, parsers
 from rest_framework.decorators import action
 from rest_framework.response import Response
-from django.db.models import Q, Sum, Count
+from django.db.models import Q, Sum, Count, Avg
 from django.shortcuts import get_object_or_404
 from django.core.exceptions import PermissionDenied
 from datetime import datetime, date
@@ -133,7 +133,7 @@ class ViajeViewSet(viewsets.ModelViewSet):
             return Response({'error': 'Solo se puede completar un viaje en curso'}, status=status.HTTP_400_BAD_REQUEST)
         viaje.estado = 'completado'
         viaje.save(update_fields=['estado'])
-        actualizar_liquidacion(viaje)
+        actualizar_liquidacion(viaje)  # actualiza liquidación del mes del viaje
         return Response({'status': 'completado'})
 
     @action(detail=True, methods=['post'], permission_classes=[IsGestor])
@@ -162,7 +162,7 @@ class GestorViewSet(viewsets.ModelViewSet):
 class EntidadViewSet(viewsets.ModelViewSet):
     queryset = Entidad.objects.all()
     serializer_class = EntidadSerializer
-    parser_classes = (parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser)  # NUEVO
+    parser_classes = (parsers.MultiPartParser, parsers.FormParser, parsers.JSONParser)
 
     def get_permissions(self):
         if self.action == 'mi_entidad':
@@ -220,18 +220,25 @@ class LiquidacionMensualViewSet(viewsets.ModelViewSet):
         return Response({'status': 'no pagada, entidad suspendida'})
 
 
+# ==================== ADMIN STATS (MEJORADO) ====================
 class AdminStatsViewSet(viewsets.ViewSet):
     permission_classes = [IsAdmin]
 
     def list(self, request):
+        """Resumen general del sistema"""
         total_ingresos = LiquidacionMensual.objects.aggregate(Sum('ingresos_totales'))['ingresos_totales__sum'] or 0
         total_comision = LiquidacionMensual.objects.aggregate(Sum('comision'))['comision__sum'] or 0
+        total_pasajeros = LiquidacionMensual.objects.aggregate(Sum('total_pasajeros'))['total_pasajeros__sum'] or 0
         entidades = Entidad.objects.all()
         total_entidades = entidades.count()
         total_gestores = Gestor.objects.count()
         entidades_suspendidas = entidades.filter(suspendida=True).count()
 
+        # Viajes activos hoy
         hoy = date.today()
+        viajes_hoy = Viaje.objects.filter(fecha=hoy, estado__in=['activo', 'lleno']).count()
+
+        # Últimos 6 meses de ingresos
         ultimos_meses = []
         for i in range(6):
             mes = hoy.month - i
@@ -239,31 +246,42 @@ class AdminStatsViewSet(viewsets.ViewSet):
             if mes <= 0:
                 mes += 12
                 año -= 1
-            total = LiquidacionMensual.objects.filter(año=año, mes=mes).aggregate(Sum('ingresos_totales'))['ingresos_totales__sum'] or 0
+            total = LiquidacionMensual.objects.filter(año=año, mes=mes).aggregate(
+                ingresos=Sum('ingresos_totales'),
+                pasajeros=Sum('total_pasajeros'),
+                viajes=Sum('total_viajes_completados')
+            )
             ultimos_meses.append({
                 'año': año,
                 'mes': mes,
-                'ingresos': float(total)
+                'ingresos': float(total['ingresos'] or 0),
+                'pasajeros': total['pasajeros'] or 0,
+                'viajes_completados': total['viajes'] or 0,
             })
         ultimos_meses.reverse()
 
         return Response({
             'total_ingresos': float(total_ingresos),
             'total_comision': float(total_comision),
+            'total_pasajeros': total_pasajeros,
             'total_entidades': total_entidades,
             'total_gestores': total_gestores,
             'entidades_suspendidas': entidades_suspendidas,
+            'viajes_hoy': viajes_hoy,
             'ingresos_mensuales': ultimos_meses,
         })
 
     @action(detail=False, methods=['get'], url_path='entidades-resumen')
     def entidades_resumen(self, request):
+        """Resumen de cada entidad con sus métricas agregadas"""
         entidades = Entidad.objects.all()
         resultado = []
         for entidad in entidades:
             liquidaciones = LiquidacionMensual.objects.filter(entidad=entidad)
             ingresos = liquidaciones.aggregate(Sum('ingresos_totales'))['ingresos_totales__sum'] or 0
             comision = liquidaciones.aggregate(Sum('comision'))['comision__sum'] or 0
+            pasajeros = liquidaciones.aggregate(Sum('total_pasajeros'))['total_pasajeros__sum'] or 0
+            viajes_completados = liquidaciones.aggregate(Sum('total_viajes_completados'))['total_viajes_completados__sum'] or 0
             ultima_liquidacion = liquidaciones.order_by('-año', '-mes').first()
             resultado.append({
                 'id': entidad.id,
@@ -271,8 +289,11 @@ class AdminStatsViewSet(viewsets.ViewSet):
                 'telefono': entidad.telefono,
                 'comision_porcentaje': float(entidad.comision_porcentaje),
                 'suspendida': entidad.suspendida,
+                'puntuacion_promedio': entidad.puntuacion_promedio,
                 'ingresos_totales': float(ingresos),
                 'comision_total': float(comision),
+                'total_pasajeros': pasajeros,
+                'total_viajes_completados': viajes_completados,
                 'ultima_liquidacion': {
                     'año': ultima_liquidacion.año if ultima_liquidacion else None,
                     'mes': ultima_liquidacion.mes if ultima_liquidacion else None,
@@ -280,6 +301,57 @@ class AdminStatsViewSet(viewsets.ViewSet):
                 } if ultima_liquidacion else None
             })
         return Response(resultado)
+
+    @action(detail=False, methods=['get'], url_path='detalle-mensual')
+    def detalle_mensual(self, request):
+        """Estadísticas detalladas de un mes específico (por defecto mes actual)"""
+        año = request.query_params.get('año')
+        mes = request.query_params.get('mes')
+        hoy = date.today()
+        if not año or not mes:
+            año = str(hoy.year)
+            mes = str(hoy.month)
+        año = int(año)
+        mes = int(mes)
+
+        # Viajes completados en ese mes (por fecha de viaje)
+        viajes_mes = Viaje.objects.filter(
+            estado='completado',
+            fecha__year=año,
+            fecha__month=mes
+        )
+        total_ingresos = viajes_mes.aggregate(Sum('precio'))['precio__sum'] or 0
+        total_pasajeros = viajes_mes.aggregate(Sum('pasajeros_count'))['pasajeros_count__sum'] or 0
+        total_viajes = viajes_mes.count()
+
+        # Desglose por entidad
+        entidades_data = []
+        for entidad in Entidad.objects.all():
+            viajes_entidad = viajes_mes.filter(entidad=entidad)
+            if viajes_entidad.exists():
+                entidades_data.append({
+                    'entidad_id': entidad.id,
+                    'entidad_nombre': entidad.nombre,
+                    'viajes': viajes_entidad.count(),
+                    'ingresos': float(viajes_entidad.aggregate(Sum('precio'))['precio__sum'] or 0),
+                    'pasajeros': viajes_entidad.aggregate(Sum('pasajeros_count'))['pasajeros_count__sum'] or 0,
+                })
+
+        # Liquidaciones pagadas/no pagadas
+        liquidaciones = LiquidacionMensual.objects.filter(año=año, mes=mes)
+        pagadas = liquidaciones.filter(pagada=True).count()
+        no_pagadas = liquidaciones.filter(pagada=False).count()
+
+        return Response({
+            'año': año,
+            'mes': mes,
+            'total_ingresos': float(total_ingresos),
+            'total_pasajeros': total_pasajeros,
+            'total_viajes': total_viajes,
+            'entidades': entidades_data,
+            'liquidaciones_pagadas': pagadas,
+            'liquidaciones_no_pagadas': no_pagadas,
+        })
 
     @action(detail=True, methods=['post'], url_path='suspender')
     def suspender_entidad(self, request, pk=None):
@@ -296,6 +368,7 @@ class AdminStatsViewSet(viewsets.ViewSet):
         return Response({'status': 'activada'})
 
 
+# ==================== PUNTUACIONES ====================
 class PuntuacionViewSet(viewsets.ModelViewSet):
     queryset = Puntuacion.objects.all()
     serializer_class = PuntuacionSerializer
