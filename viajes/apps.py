@@ -8,23 +8,24 @@ class ViajesConfig(AppConfig):
     def ready(self):
         if os.environ.get('RENDER'):
             try:
+                from django.core.management import call_command
                 from django.db import connection
-                from django.contrib.auth import get_user_model
-
-                # Verificar y crear columna imagen_promocional si no existe
+                # Verificar si la columna imagen_promocional existe
                 with connection.cursor() as cursor:
                     cursor.execute("""
-                        DO $$
-                        BEGIN
-                            IF NOT EXISTS (SELECT 1 FROM information_schema.columns 
-                                           WHERE table_name='viajes_entidad' AND column_name='imagen_promocional') THEN
-                                ALTER TABLE viajes_entidad ADD COLUMN imagen_promocional varchar(500);
-                            END IF;
-                        END $$;
+                        SELECT column_name
+                        FROM information_schema.columns
+                        WHERE table_name='viajes_entidad' AND column_name='imagen_promocional'
                     """)
-                    print("✅ Columna imagen_promocional verificada/creada")
+                    exists = cursor.fetchone()
+                if not exists:
+                    print("🔧 Forzando creación de columnas...")
+                    call_command('makemigrations', 'viajes', interactive=False)
+                    call_command('migrate', interactive=False)
+                    print("✅ Migraciones completadas")
 
                 # Crear superusuario si no existe
+                from django.contrib.auth import get_user_model
                 User = get_user_model()
                 if not User.objects.filter(is_superuser=True).exists():
                     username = os.environ.get('DJANGO_SUPERUSER_USERNAME', 'admin')
@@ -32,6 +33,5 @@ class ViajesConfig(AppConfig):
                     password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', 'admin123')
                     print(f"🔧 Creando superusuario: {username}")
                     User.objects.create_superuser(username, email, password)
-
             except Exception as e:
                 print(f"⚠️ Error en migración automática: {e}")
