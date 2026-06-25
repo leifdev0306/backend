@@ -19,12 +19,16 @@ from .serializers import (
     LiquidacionMensualSerializer, HistorialEstadoSerializer,
     NotificacionSerializer, ConfiguracionSerializer
 )
-from .permissions import IsGestor, IsAdmin, IsGestorOrAdmin, IsOwnerOrReadOnly
-from .utils import actualizar_liquidacion, crear_historial_estado, enviar_notificacion
-from rest_framework import generics
+from .permissions import IsGestor, IsAdmin, IsGestorOrAdmin
+from .utils import (
+    actualizar_liquidacion, crear_historial_estado, enviar_notificacion,
+    enviar_email_notificacion, obtener_configuracion
+)
 from rest_framework.pagination import PageNumberPagination
 from django_filters.rest_framework import DjangoFilterBackend
+import logging
 
+logger = logging.getLogger(__name__)
 
 # ==================== PAGINACIÓN ====================
 class ViajePagination(PageNumberPagination):
@@ -32,36 +36,27 @@ class ViajePagination(PageNumberPagination):
     page_size_query_param = 'page_size'
     max_page_size = 50
 
-
 class EntidadPagination(PageNumberPagination):
     page_size = 10
-
 
 # ==================== HEALTH CHECK ====================
 def health_check(request):
     return JsonResponse({"status": "ok", "timestamp": datetime.now().isoformat()})
 
-
 def update_viajes_estados(request):
-    """
-    Actualiza automáticamente viajes activos/llenos cuyo horario ya pasó a 'en_curso'.
-    También pasa a 'completado' viajes en_curso que llevan más de 30 minutos.
-    """
+    """Actualiza automáticamente los estados de los viajes."""
     ahora = timezone.now()
-    # 1. Activo/Lleno → En curso
     activos = Viaje.objects.filter(
         estado__in=['activo', 'lleno'],
         fecha__lt=ahora.date()
     ).exclude(
         Q(fecha=ahora.date()) & Q(hora__gt=ahora.time())
     )
-    # Incluir los de hoy con hora <= actual
     activos_hoy = Viaje.objects.filter(
         estado__in=['activo', 'lleno'],
         fecha=ahora.date(),
         hora__lte=ahora.time()
     )
-    # Unir y actualizar
     activos_a_actualizar = (activos | activos_hoy).distinct()
     count_activos = activos_a_actualizar.count()
     for viaje in activos_a_actualizar:
@@ -69,9 +64,7 @@ def update_viajes_estados(request):
         viaje.save(update_fields=['estado'])
         crear_historial_estado(viaje, 'activo/lleno', 'en_curso', motivo='Actualización automática por hora de salida')
 
-    # 2. En curso → Completado (después de 30 minutos de la hora de salida)
-    # Por simplicidad, tomamos los que tienen más de 30 minutos desde su hora de salida
-    # En un sistema real, se usaría la duración estimada.
+    # En curso → Completado (después de 30 minutos)
     tiempo_limite = ahora - timedelta(minutes=30)
     en_curso = Viaje.objects.filter(
         estado='en_curso',
@@ -96,17 +89,14 @@ def update_viajes_estados(request):
         'status': 'ok',
         'updated_activos': count_activos,
         'updated_en_curso': count_en_curso,
-        'message': f'Se actualizaron {count_activos} viajes a "en_curso" y {count_en_curso} a "completado".'
+        'message': f'Actualizados {count_activos} a "en_curso" y {count_en_curso} a "completado".'
     })
-
 
 # ==================== VIEWSETS ====================
 class ProvinciaViewSet(viewsets.ReadOnlyModelViewSet):
     queryset = Provincia.objects.all()
     serializer_class = ProvinciaSerializer
     permission_classes = [permissions.AllowAny]
-    pagination_class = None  # sin paginación para provincias
-
 
 class EntidadViewSet(viewsets.ModelViewSet):
     queryset = Entidad.objects.all()
@@ -149,7 +139,6 @@ class EntidadViewSet(viewsets.ModelViewSet):
             return Response(serializer.data)
         return Response({'error': 'No eres gestor'}, status=status.HTTP_403_FORBIDDEN)
 
-
 class ViajeViewSet(viewsets.ModelViewSet):
     queryset = Viaje.objects.all()
     serializer_class = ViajeSerializer
@@ -184,14 +173,6 @@ class ViajeViewSet(viewsets.ModelViewSet):
 
     def perform_create(self, serializer):
         entidad = self.request.user.gestor.entidad
-        # Generar número de viaje
-        import random
-        import string
-        num_viaje = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
-        serializer.save(entidad=entidad, numero_viaje=num_viaje)
-
-    def perform_update(self, serializer):
-        entidad = self.request.user.gestor.entidad
         serializer.save(entidad=entidad)
 
     @action(detail=False, methods=['get'], url_path='activos')
@@ -217,7 +198,7 @@ class ViajeViewSet(viewsets.ModelViewSet):
                 qs = qs.filter(fecha=fecha_parsed)
             except ValueError:
                 pass
-        # Aplicar paginación
+        qs = qs.order_by('fecha', 'hora')
         page = self.paginate_queryset(qs)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -235,13 +216,11 @@ class ViajeViewSet(viewsets.ModelViewSet):
         if viaje.cupos_disponibles <= 0:
             return Response({'error': 'No hay cupos disponibles'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Validar datos
         ci = request.data.get('ci')
         nombre = request.data.get('nombre_completo')
         if not ci or not nombre:
             return Response({'error': 'Nombre y CI son obligatorios'}, status=status.HTTP_400_BAD_REQUEST)
 
-        # Verificar si ya tiene reserva en este viaje
         if Pasajero.objects.filter(viaje=viaje, ci=ci).exists():
             return Response({'error': 'Ya tienes una reserva en este viaje'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -257,7 +236,6 @@ class ViajeViewSet(viewsets.ModelViewSet):
         serializer.is_valid(raise_exception=True)
         serializer.save()
 
-        # Si se llena, cambiar estado
         if viaje.cupos_disponibles == 0:
             viaje.estado = 'lleno'
             viaje.save(update_fields=['estado'])
@@ -272,6 +250,11 @@ class ViajeViewSet(viewsets.ModelViewSet):
                     tipo='reserva',
                     mensaje=f'Nueva reserva de {nombre} para {viaje.origen} → {viaje.destino}'
                 )
+                enviar_email_notificacion(
+                    gestor.user,
+                    f'Nueva reserva - {viaje.numero_viaje}',
+                    f'El pasajero {nombre} ha reservado en el viaje {viaje.numero_viaje}'
+                )
 
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
@@ -285,11 +268,9 @@ class ViajeViewSet(viewsets.ModelViewSet):
         if not pasajero:
             return Response({'error': 'No se encontró reserva con ese CI'}, status=status.HTTP_404_NOT_FOUND)
 
-        # Verificar si está dentro del plazo (2 horas antes)
         ahora = timezone.now()
         salida = timezone.make_aware(datetime.combine(viaje.fecha, viaje.hora))
         if (salida - ahora).total_seconds() < 7200:  # menos de 2 horas
-            # Se marca como cancelado_tarde en el historial
             crear_historial_estado(
                 viaje, 'reserva', 'cancelado_tarde',
                 usuario=request.user if request.user.is_authenticated else None,
@@ -315,7 +296,6 @@ class ViajeViewSet(viewsets.ModelViewSet):
         ci = request.data.get('ci')
         if not ci:
             return Response({'error': 'CI obligatorio'}, status=status.HTTP_400_BAD_REQUEST)
-        # Verificar duplicado
         if Pasajero.objects.filter(viaje=viaje, ci=ci).exists():
             return Response({'error': 'Ya existe un pasajero con ese CI'}, status=status.HTTP_400_BAD_REQUEST)
 
@@ -349,7 +329,7 @@ class ViajeViewSet(viewsets.ModelViewSet):
     @action(detail=True, methods=['post'], permission_classes=[IsGestorOrAdmin])
     def cancelar(self, request, pk=None):
         viaje = self.get_object()
-        if viaje.estado in ['completado', 'cancelado']:
+        if viaje.estado in ['completado', 'cancelado', 'cancelado_tarde']:
             return Response({'error': 'No se puede cancelar este viaje'}, status=status.HTTP_400_BAD_REQUEST)
         estado_anterior = viaje.estado
         viaje.estado = 'cancelado'
@@ -371,7 +351,6 @@ class ViajeViewSet(viewsets.ModelViewSet):
         serializer = HistorialEstadoSerializer(historial, many=True)
         return Response(serializer.data)
 
-
 class ConductorViewSet(viewsets.ModelViewSet):
     queryset = Conductor.objects.all()
     serializer_class = ConductorSerializer
@@ -391,7 +370,6 @@ class ConductorViewSet(viewsets.ModelViewSet):
     def perform_create(self, serializer):
         entidad = self.request.user.gestor.entidad
         serializer.save(entidad=entidad)
-
 
 class VehiculoViewSet(viewsets.ModelViewSet):
     queryset = Vehiculo.objects.all()
@@ -413,7 +391,6 @@ class VehiculoViewSet(viewsets.ModelViewSet):
         entidad = self.request.user.gestor.entidad
         serializer.save(entidad=entidad)
 
-
 class RutaViewSet(viewsets.ModelViewSet):
     queryset = Ruta.objects.all()
     serializer_class = RutaSerializer
@@ -423,18 +400,27 @@ class RutaViewSet(viewsets.ModelViewSet):
     filterset_fields = ['activa']
 
     def get_queryset(self):
-        if self.request.user.is_staff:
+        user = self.request.user
+        if user.is_staff:
             return Ruta.objects.all()
-        # Los gestores pueden ver todas las rutas, pero solo crear/editar las suyas? Mejor admin puede crear.
-        # Para simplificar, solo admin puede gestionar rutas.
-        return Ruta.objects.all()
+        if hasattr(user, 'gestor'):
+            return Ruta.objects.all()  # Los gestores pueden ver todas las rutas, pero solo admin puede crear/modificar
+        return Ruta.objects.none()
 
+    def perform_create(self, serializer):
+        if not self.request.user.is_staff:
+            raise PermissionDenied("Solo administradores pueden crear rutas.")
+        serializer.save()
+
+    def perform_update(self, serializer):
+        if not self.request.user.is_staff:
+            raise PermissionDenied("Solo administradores pueden modificar rutas.")
+        serializer.save()
 
 class GestorViewSet(viewsets.ModelViewSet):
     queryset = Gestor.objects.all()
     serializer_class = GestorSerializer
     permission_classes = [IsAdmin]
-
 
 class LiquidacionMensualViewSet(viewsets.ModelViewSet):
     queryset = LiquidacionMensual.objects.all()
@@ -459,7 +445,6 @@ class LiquidacionMensualViewSet(viewsets.ModelViewSet):
         entidad.save(update_fields=['suspendida'])
         return Response({'status': 'no pagada, entidad suspendida'})
 
-
 class PuntuacionViewSet(viewsets.ModelViewSet):
     queryset = Puntuacion.objects.all()
     serializer_class = PuntuacionSerializer
@@ -476,7 +461,6 @@ class PuntuacionViewSet(viewsets.ModelViewSet):
         ).exclude(
             puntuaciones__ci_cliente=ci
         ).distinct()
-        # Agrupar por categorías ya puntuadas
         page = self.paginate_queryset(viajes_completados)
         if page is not None:
             serializer = ViajeSerializer(page, many=True, context={'request': request})
@@ -512,7 +496,6 @@ class PuntuacionViewSet(viewsets.ModelViewSet):
         serializer = PuntuacionSerializer(puntuacion)
         return Response(serializer.data, status=status.HTTP_201_CREATED)
 
-
 class NotificacionViewSet(viewsets.ModelViewSet):
     queryset = Notificacion.objects.all()
     serializer_class = NotificacionSerializer
@@ -533,6 +516,10 @@ class NotificacionViewSet(viewsets.ModelViewSet):
         self.get_queryset().update(leida=True)
         return Response({'status': 'todas leidas'})
 
+class ConfiguracionViewSet(viewsets.ModelViewSet):
+    queryset = Configuracion.objects.all()
+    serializer_class = ConfiguracionSerializer
+    permission_classes = [IsAdmin]
 
 class AdminStatsViewSet(viewsets.ViewSet):
     permission_classes = [IsAdmin]

@@ -4,8 +4,8 @@ from .views import (
     ProvinciaViewSet, ViajeViewSet, GestorViewSet,
     EntidadViewSet, ConductorViewSet, VehiculoViewSet,
     RutaViewSet, LiquidacionMensualViewSet, PuntuacionViewSet,
-    NotificacionViewSet, AdminStatsViewSet, health_check,
-    update_viajes_estados
+    NotificacionViewSet, ConfiguracionViewSet, AdminStatsViewSet,
+    health_check, update_viajes_estados
 )
 
 router = DefaultRouter()
@@ -19,6 +19,7 @@ router.register(r'rutas', RutaViewSet)
 router.register(r'liquidaciones', LiquidacionMensualViewSet)
 router.register(r'puntuaciones', PuntuacionViewSet)
 router.register(r'notificaciones', NotificacionViewSet)
+router.register(r'configuraciones', ConfiguracionViewSet)
 
 urlpatterns = [
     path('', include(router.urls)),

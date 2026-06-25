@@ -10,8 +10,8 @@ from rest_framework import permissions
 schema_view = get_schema_view(
     openapi.Info(
         title="CubaTravels API",
-        default_version='v2',
-        description="API para la plataforma de transporte CubaTravels",
+        default_version='v3',
+        description="API para la plataforma de gestión de viajes CubaTravels",
         terms_of_service="https://www.google.com/policies/terms/",
         contact=openapi.Contact(email="leifdev0306@gmail.com"),
         license=openapi.License(name="BSD License"),
@@ -25,7 +25,7 @@ urlpatterns = [
     path('api/token/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
     path('api/token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
     path('api/', include('viajes.urls')),
-    # Swagger
+    # Documentation
     path('swagger/', schema_view.with_ui('swagger', cache_timeout=0), name='schema-swagger-ui'),
     path('redoc/', schema_view.with_ui('redoc', cache_timeout=0), name='schema-redoc'),
 ]

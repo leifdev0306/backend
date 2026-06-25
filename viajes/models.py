@@ -1,6 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
-from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
+from django.core.validators import MinValueValidator, MaxValueValidator
 from django.utils import timezone
 from decimal import Decimal
 
@@ -21,12 +21,12 @@ class Entidad(models.Model):
     email = models.EmailField(blank=True, null=True)
     direccion = models.TextField(blank=True)
     descripcion = models.TextField(blank=True)
-    logo_url = models.URLField(max_length=500, blank=True, null=True)
-    imagen_promocional = models.ImageField(upload_to='entidades/', blank=True, null=True)
+    logo = models.ImageField(upload_to='entidades/logos/', blank=True, null=True)
+    imagen_promocional = models.ImageField(upload_to='entidades/promocionales/', blank=True, null=True)
     horario_atencion = models.CharField(max_length=200, blank=True)
     numero_licencia = models.CharField(max_length=50, blank=True)
     comision_porcentaje = models.DecimalField(max_digits=5, decimal_places=2, default=10.0)
-    suspendida = models.BooleanField(default=False)  # mantengo compatibilidad
+    suspendida = models.BooleanField(default=False)
     activa = models.BooleanField(default=True)
     plan = models.CharField(max_length=20, choices=PLANES, default='basico')
     fecha_registro = models.DateTimeField(auto_now_add=True)
@@ -50,6 +50,7 @@ class Gestor(models.Model):
     entidad = models.ForeignKey(Entidad, on_delete=models.CASCADE, related_name='gestores')
     telefono = models.CharField(max_length=20, blank=True)
     notificaciones_email = models.BooleanField(default=True)
+    notificaciones_push = models.BooleanField(default=True)
 
     def __str__(self):
         return f"{self.user.username} - {self.entidad.nombre}"
@@ -62,6 +63,10 @@ class Conductor(models.Model):
     email = models.EmailField(blank=True, null=True)
     licencia = models.CharField(max_length=50)
     activo = models.BooleanField(default=True)
+    fecha_creacion = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['nombre']
 
     def __str__(self):
         return f"{self.nombre} ({self.cedula})"
@@ -88,7 +93,10 @@ class Vehiculo(models.Model):
     año = models.PositiveIntegerField(null=True, blank=True)
     capacidad = models.PositiveSmallIntegerField()
     estado = models.CharField(max_length=20, choices=ESTADOS, default='disponible')
-    imagen_url = models.URLField(max_length=500, blank=True, null=True)
+    imagen = models.ImageField(upload_to='vehiculos/', blank=True, null=True)
+
+    class Meta:
+        ordering = ['placa']
 
     def __str__(self):
         return f"{self.placa} - {self.get_tipo_display()}"
@@ -102,6 +110,7 @@ class Ruta(models.Model):
 
     class Meta:
         unique_together = ['origen', 'destino']
+        ordering = ['origen__nombre', 'destino__nombre']
 
     def __str__(self):
         return f"{self.origen} → {self.destino}"
@@ -122,7 +131,7 @@ class Viaje(models.Model):
         ('en_curso','En curso'),
         ('completado','Completado'),
         ('cancelado','Cancelado'),
-        ('cancelado_tarde', 'Cancelado tarde'),  # cancelado sin tiempo suficiente
+        ('cancelado_tarde', 'Cancelado tarde'),
     ]
     entidad = models.ForeignKey(Entidad, on_delete=models.CASCADE, related_name='viajes')
     conductor = models.ForeignKey(Conductor, on_delete=models.SET_NULL, null=True, blank=True)
@@ -140,7 +149,7 @@ class Viaje(models.Model):
     descripcion = models.TextField(blank=True)
     precio = models.DecimalField(max_digits=10, decimal_places=2)
     estado = models.CharField(max_length=20, choices=ESTADO_CHOICES, default='activo', db_index=True)
-    numero_viaje = models.CharField(max_length=20, blank=True)
+    numero_viaje = models.CharField(max_length=20, blank=True, unique=True)
     duracion_estimada = models.PositiveIntegerField(help_text="Duración en minutos", default=60)
     kilometraje = models.DecimalField(max_digits=10, decimal_places=2, default=0)
     notas_internas = models.TextField(blank=True)
@@ -152,6 +161,7 @@ class Viaje(models.Model):
             models.Index(fields=['entidad', 'estado']),
             models.Index(fields=['fecha', 'estado']),
         ]
+        ordering = ['fecha', 'hora']
 
     @property
     def pasajeros_count(self):
@@ -164,11 +174,17 @@ class Viaje(models.Model):
     @property
     def fecha_hora_salida(self):
         return timezone.make_aware(
-            datetime.combine(self.fecha, self.hora)
-        ) if timezone.is_naive else datetime.combine(self.fecha, self.hora)
+            timezone.datetime.combine(self.fecha, self.hora)
+        ) if timezone.is_naive else timezone.datetime.combine(self.fecha, self.hora)
+
+    def save(self, *args, **kwargs):
+        if not self.numero_viaje:
+            import random, string
+            self.numero_viaje = ''.join(random.choices(string.ascii_uppercase + string.digits, k=8))
+        super().save(*args, **kwargs)
 
     def __str__(self):
-        return f"{self.origen} → {self.destino} ({self.fecha} {self.hora})"
+        return f"{self.numero_viaje} - {self.origen} → {self.destino} ({self.fecha} {self.hora})"
 
 class Pasajero(models.Model):
     viaje = models.ForeignKey(Viaje, on_delete=models.CASCADE, related_name='reservas')
@@ -182,6 +198,7 @@ class Pasajero(models.Model):
 
     class Meta:
         unique_together = [['viaje', 'ci']]
+        ordering = ['reservado_en']
 
     def __str__(self):
         return f"{self.nombre_completo} - {self.ci}"
@@ -208,6 +225,9 @@ class Puntuacion(models.Model):
     class Meta:
         unique_together = [['viaje', 'ci_cliente', 'categoria']]
 
+    def __str__(self):
+        return f"{self.viaje} - {self.categoria} - {self.valor}"
+
 class LiquidacionMensual(models.Model):
     entidad = models.ForeignKey(Entidad, on_delete=models.CASCADE, related_name='liquidaciones')
     año = models.PositiveSmallIntegerField()
@@ -221,6 +241,7 @@ class LiquidacionMensual(models.Model):
 
     class Meta:
         unique_together = [['entidad', 'año', 'mes']]
+        ordering = ['-año', '-mes']
 
     def __str__(self):
         return f"{self.entidad.nombre} - {self.mes}/{self.año}"
@@ -233,6 +254,9 @@ class HistorialEstado(models.Model):
     usuario = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, blank=True)
     motivo = models.CharField(max_length=255, blank=True)
 
+    class Meta:
+        ordering = ['-fecha_cambio']
+
     def __str__(self):
         return f"{self.viaje} - {self.estado_anterior} → {self.estado_nuevo}"
 
@@ -242,6 +266,7 @@ class Notificacion(models.Model):
         ('recordatorio', 'Recordatorio'),
         ('cancelacion', 'Cancelación'),
         ('promocion', 'Promoción'),
+        ('reserva', 'Nueva reserva'),
     ]
     usuario = models.ForeignKey(User, on_delete=models.CASCADE, related_name='notificaciones')
     viaje = models.ForeignKey(Viaje, on_delete=models.CASCADE, null=True, blank=True)
@@ -250,6 +275,9 @@ class Notificacion(models.Model):
     leida = models.BooleanField(default=False)
     fecha_envio = models.DateTimeField(auto_now_add=True)
     datos_extra = models.JSONField(default=dict, blank=True)
+
+    class Meta:
+        ordering = ['-fecha_envio']
 
     def __str__(self):
         return f"{self.tipo} - {self.usuario.username}"

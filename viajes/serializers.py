@@ -1,12 +1,10 @@
 from rest_framework import serializers
 from django.contrib.auth.models import User
-from django.core.exceptions import ValidationError
 from .models import (
     Provincia, Entidad, Viaje, Pasajero, Gestor, Conductor, Vehiculo,
     Ruta, Puntuacion, LiquidacionMensual, HistorialEstado, Notificacion,
     Configuracion
 )
-from decimal import Decimal
 
 class ProvinciaSerializer(serializers.ModelSerializer):
     class Meta:
@@ -23,6 +21,7 @@ class ConductorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Conductor
         fields = '__all__'
+        read_only_fields = ['fecha_creacion']
 
 class VehiculoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -36,6 +35,12 @@ class RutaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Ruta
         fields = '__all__'
+
+class PasajeroSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = Pasajero
+        fields = ['id', 'viaje', 'nombre_completo', 'ci', 'telefono_contacto',
+                  'email', 'asiento_asignado', 'confirmado', 'reservado_en']
 
 class ViajeSerializer(serializers.ModelSerializer):
     origen_nombre = serializers.ReadOnlyField(source='origen.nombre')
@@ -75,7 +80,6 @@ class ViajeSerializer(serializers.ModelSerializer):
         return None
 
     def validate(self, data):
-        # Validar que fecha/hora no sea pasada (excepto para actualizaciones)
         if self.instance is None:
             fecha = data.get('fecha')
             hora = data.get('hora')
@@ -87,12 +91,6 @@ class ViajeSerializer(serializers.ModelSerializer):
                     raise serializers.ValidationError("La fecha/hora de salida no puede ser pasada.")
         return data
 
-class PasajeroSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Pasajero
-        fields = ['id', 'viaje', 'nombre_completo', 'ci', 'telefono_contacto',
-                  'email', 'asiento_asignado', 'confirmado', 'reservado_en']
-
 class PuntuacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Puntuacion
@@ -101,7 +99,8 @@ class PuntuacionSerializer(serializers.ModelSerializer):
     def validate(self, data):
         viaje = data.get('viaje')
         ci = data.get('ci_cliente')
-        if viaje and ci and Puntuacion.objects.filter(viaje=viaje, ci_cliente=ci, categoria=data.get('categoria')).exists():
+        categoria = data.get('categoria')
+        if viaje and ci and Puntuacion.objects.filter(viaje=viaje, ci_cliente=ci, categoria=categoria).exists():
             raise serializers.ValidationError("Ya has puntuado este viaje en esta categoría.")
         return data
 
@@ -137,7 +136,8 @@ class GestorSerializer(serializers.ModelSerializer):
 
     class Meta:
         model = Gestor
-        fields = ['id', 'entidad', 'entidad_nombre', 'username', 'password', 'telefono', 'notificaciones_email']
+        fields = ['id', 'entidad', 'entidad_nombre', 'username', 'password', 'telefono',
+                  'notificaciones_email', 'notificaciones_push']
 
     def create(self, validated_data):
         username = validated_data.pop('username')
