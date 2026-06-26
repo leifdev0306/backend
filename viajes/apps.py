@@ -1,4 +1,7 @@
 from django.apps import AppConfig
+from django.core.management import call_command
+from django.db.utils import OperationalError, ProgrammingError
+import sys
 import os
 
 class ViajesConfig(AppConfig):
@@ -6,73 +9,30 @@ class ViajesConfig(AppConfig):
     name = 'viajes'
 
     def ready(self):
-        if os.environ.get('RENDER'):
-            try:
-                from django.core.management import call_command
-                from django.db import connection
+        if os.environ.get('RUN_MAIN') or os.environ.get('DJANGO_AUTORELOAD'):
+            return
+        if 'migrate' in sys.argv or 'makemigrations' in sys.argv:
+            return
+        if 'test' in sys.argv:
+            return
 
-                print("🔧 Verificando y actualizando esquema de base de datos...")
+        from django.contrib.auth import get_user_model
+        User = get_user_model()
 
-                # Verificar si las tablas principales existen
-                with connection.cursor() as cursor:
-                    cursor.execute("""
-                        SELECT COUNT(*) FROM information_schema.tables
-                        WHERE table_name = 'viajes_entidad'
-                    """)
-                    table_exists = cursor.fetchone()[0] > 0
+        try:
+            call_command('migrate', verbosity=0)
+        except (OperationalError, ProgrammingError) as e:
+            print(f"Error al migrar: {e}")
 
-                if not table_exists:
-                    print("🔧 Creando tablas desde cero...")
-                    call_command('makemigrations', 'viajes', interactive=False)
-                    call_command('migrate', interactive=False)
-                else:
-                    # Verificar columnas faltantes en Entidad
-                    cursor.execute("""
-                        SELECT column_name
-                        FROM information_schema.columns
-                        WHERE table_name = 'viajes_entidad'
-                    """)
-                    existing_columns = [row[0] for row in cursor.fetchall()]
-
-                    required_columns = {
-                        'email': 'varchar(254)',
-                        'direccion': 'text',
-                        'descripcion': 'text',
-                        'logo': 'varchar(100)',
-                        'imagen_promocional': 'varchar(100)',
-                        'horario_atencion': 'varchar(200)',
-                        'numero_licencia': 'varchar(50)',
-                        'activa': 'boolean DEFAULT true',
-                        'plan': 'varchar(20) DEFAULT \'basico\'',
-                        'fecha_registro': 'timestamp with time zone DEFAULT now()',
-                    }
-
-                    for col, col_type in required_columns.items():
-                        if col not in existing_columns:
-                            print(f"🔧 Añadiendo columna '{col}' a viajes_entidad...")
-                            try:
-                                cursor.execute(f"""
-                                    ALTER TABLE viajes_entidad
-                                    ADD COLUMN {col} {col_type};
-                                """)
-                                print(f"✅ Columna '{col}' añadida.")
-                            except Exception as e:
-                                print(f"⚠️ Error añadiendo columna '{col}': {e}")
-
-                    # Ejecutar migraciones para el resto de modelos
-                    call_command('migrate', interactive=False)
-
-                # Crear superusuario
-                from django.contrib.auth import get_user_model
-                User = get_user_model()
-                if not User.objects.filter(is_superuser=True).exists():
-                    username = os.environ.get('DJANGO_SUPERUSER_USERNAME', 'admin')
-                    email = os.environ.get('DJANGO_SUPERUSER_EMAIL', 'admin@example.com')
-                    password = os.environ.get('DJANGO_SUPERUSER_PASSWORD', 'admin123')
-                    print(f"🔧 Creando superusuario: {username}")
-                    User.objects.create_superuser(username, email, password)
-
-                print("✅ Inicialización completada.")
-
-            except Exception as e:
-                print(f"⚠️ Error en migración automática: {e}")
+        try:
+            if not User.objects.filter(username='leifdev').exists():
+                User.objects.create_superuser(
+                    username='leifdev',
+                    email='leifdev0306@gmail.com',
+                    password='Palas@123'
+                )
+                print("Superusuario 'leifdev' creado con éxito.")
+            else:
+                print("Superusuario 'leifdev' ya existe.")
+        except Exception as e:
+            print(f"Error al crear superusuario: {e}")

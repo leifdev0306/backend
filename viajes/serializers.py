@@ -1,27 +1,28 @@
 from rest_framework import serializers
-from django.contrib.auth.models import User
 from .models import (
-    Provincia, Entidad, Viaje, Pasajero, Gestor, Conductor, Vehiculo,
-    Ruta, Puntuacion, LiquidacionMensual, HistorialEstado, Notificacion,
-    Configuracion
+    Provincia, Entidad, Conductor, Vehiculo, Ruta, Viaje,
+    Reserva, Puntuacion, Notificacion, LiquidacionMensual,
+    Configuracion, Promocion
 )
+from django.contrib.auth.models import User
 
+# ---------- Serializers básicos ----------
 class ProvinciaSerializer(serializers.ModelSerializer):
     class Meta:
         model = Provincia
         fields = '__all__'
 
 class EntidadSerializer(serializers.ModelSerializer):
+    username = serializers.CharField(source='user.username', read_only=True)
+    email = serializers.EmailField(source='user.email', read_only=True)
     class Meta:
         model = Entidad
-        fields = '__all__'
-        read_only_fields = ['puntuacion_promedio', 'fecha_registro']
+        fields = ['id', 'username', 'email', 'nombre', 'provincia', 'direccion', 'telefono', 'is_active', 'fecha_registro']
 
 class ConductorSerializer(serializers.ModelSerializer):
     class Meta:
         model = Conductor
         fields = '__all__'
-        read_only_fields = ['fecha_creacion']
 
 class VehiculoSerializer(serializers.ModelSerializer):
     class Meta:
@@ -29,118 +30,70 @@ class VehiculoSerializer(serializers.ModelSerializer):
         fields = '__all__'
 
 class RutaSerializer(serializers.ModelSerializer):
-    origen_nombre = serializers.ReadOnlyField(source='origen.nombre')
-    destino_nombre = serializers.ReadOnlyField(source='destino.nombre')
-
+    origen_nombre = serializers.CharField(source='origen.nombre', read_only=True)
+    destino_nombre = serializers.CharField(source='destino.nombre', read_only=True)
     class Meta:
         model = Ruta
-        fields = '__all__'
-
-class PasajeroSerializer(serializers.ModelSerializer):
-    class Meta:
-        model = Pasajero
-        fields = ['id', 'viaje', 'nombre_completo', 'ci', 'telefono_contacto',
-                  'email', 'asiento_asignado', 'confirmado', 'reservado_en']
+        fields = ['id', 'origen', 'destino', 'origen_nombre', 'destino_nombre', 'distancia_km', 'duracion_estimada', 'activa']
 
 class ViajeSerializer(serializers.ModelSerializer):
-    origen_nombre = serializers.ReadOnlyField(source='origen.nombre')
-    destino_nombre = serializers.ReadOnlyField(source='destino.nombre')
-    cupos_disponibles = serializers.ReadOnlyField()
-    pasajeros_count = serializers.ReadOnlyField()
-    entidad_nombre = serializers.ReadOnlyField(source='entidad.nombre')
-    entidad_puntuacion = serializers.SerializerMethodField()
-    entidad_imagen_promocional = serializers.SerializerMethodField()
-    conductor_nombre = serializers.ReadOnlyField(source='conductor.nombre', default=None)
-    vehiculo_placa = serializers.ReadOnlyField(source='vehiculo.placa', default=None)
-    ruta_info = serializers.SerializerMethodField()
+    entidad_nombre = serializers.CharField(source='entidad.nombre', read_only=True)
+    ruta_detalle = RutaSerializer(source='ruta', read_only=True)
+    reservas_count = serializers.IntegerField(source='reservas.count', read_only=True)
+    puntuacion_promedio = serializers.SerializerMethodField()
 
     class Meta:
         model = Viaje
-        fields = '__all__'
-        read_only_fields = ['estado', 'creado', 'actualizado', 'entidad', 'numero_viaje']
+        fields = [
+            'id', 'entidad', 'entidad_nombre', 'ruta', 'ruta_detalle',
+            'conductor', 'vehiculo', 'fecha_salida', 'fecha_llegada_estimada',
+            'precio', 'asientos_totales', 'asientos_disponibles', 'estado',
+            'descripcion', 'imagen_url', 'created_at', 'updated_at',
+            'reservas_count', 'puntuacion_promedio'
+        ]
+        read_only_fields = ['entidad', 'created_at', 'updated_at']
 
-    def get_entidad_puntuacion(self, obj):
-        return obj.entidad.puntuacion_promedio
+    def get_puntuacion_promedio(self, obj):
+        avg = obj.puntuaciones.aggregate(models.Avg('puntuacion'))['puntuacion__avg']
+        return round(avg, 1) if avg else None
 
-    def get_entidad_imagen_promocional(self, obj):
-        if obj.entidad.imagen_promocional:
-            request = self.context.get('request')
-            if request:
-                return request.build_absolute_uri(obj.entidad.imagen_promocional.url)
-            return obj.entidad.imagen_promocional.url
-        return None
-
-    def get_ruta_info(self, obj):
-        if obj.ruta:
-            return {
-                'id': obj.ruta.id,
-                'distancia_km': obj.ruta.distancia_km,
-                'tiempo_estimado_min': obj.ruta.tiempo_estimado_min,
-            }
-        return None
-
-    def validate(self, data):
-        if self.instance is None:
-            fecha = data.get('fecha')
-            hora = data.get('hora')
-            if fecha and hora:
-                from datetime import datetime
-                now = datetime.now()
-                salida = datetime.combine(fecha, hora)
-                if salida < now:
-                    raise serializers.ValidationError("La fecha/hora de salida no puede ser pasada.")
-        return data
+class ReservaSerializer(serializers.ModelSerializer):
+    viaje_detalle = ViajeSerializer(source='viaje', read_only=True)
+    class Meta:
+        model = Reserva
+        fields = [
+            'id', 'viaje', 'viaje_detalle', 'nombre_cliente', 'carnet_cliente',
+            'telefono', 'email', 'asientos_reservados', 'estado',
+            'token_cancelacion', 'created_at', 'updated_at'
+        ]
+        read_only_fields = ['viaje', 'estado', 'token_cancelacion']
 
 class PuntuacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Puntuacion
-        fields = ['id', 'viaje', 'ci_cliente', 'categoria', 'valor', 'comentario', 'creado']
-
-    def validate(self, data):
-        viaje = data.get('viaje')
-        ci = data.get('ci_cliente')
-        categoria = data.get('categoria')
-        if viaje and ci and Puntuacion.objects.filter(viaje=viaje, ci_cliente=ci, categoria=categoria).exists():
-            raise serializers.ValidationError("Ya has puntuado este viaje en esta categoría.")
-        return data
-
-class LiquidacionMensualSerializer(serializers.ModelSerializer):
-    entidad_nombre = serializers.ReadOnlyField(source='entidad.nombre')
-
-    class Meta:
-        model = LiquidacionMensual
         fields = '__all__'
-        read_only_fields = ['ingresos_totales', 'comision', 'total_pasajeros', 'total_viajes', 'fecha_cierre']
-
-class HistorialEstadoSerializer(serializers.ModelSerializer):
-    usuario_username = serializers.ReadOnlyField(source='usuario.username', default=None)
-
-    class Meta:
-        model = HistorialEstado
-        fields = ['id', 'viaje', 'estado_anterior', 'estado_nuevo', 'fecha_cambio', 'usuario_username', 'motivo']
+        read_only_fields = ['fecha']
 
 class NotificacionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Notificacion
-        fields = ['id', 'usuario', 'viaje', 'tipo', 'mensaje', 'leida', 'fecha_envio', 'datos_extra']
+        fields = '__all__'
+        read_only_fields = ['fecha_envio']
+
+class LiquidacionMensualSerializer(serializers.ModelSerializer):
+    class Meta:
+        model = LiquidacionMensual
+        fields = '__all__'
+        read_only_fields = ['fecha_calculo']
 
 class ConfiguracionSerializer(serializers.ModelSerializer):
     class Meta:
         model = Configuracion
         fields = '__all__'
 
-class GestorSerializer(serializers.ModelSerializer):
-    username = serializers.CharField(write_only=True)
-    password = serializers.CharField(write_only=True)
-    entidad_nombre = serializers.ReadOnlyField(source='entidad.nombre')
-
+class PromocionSerializer(serializers.ModelSerializer):
+    entidad_nombre = serializers.CharField(source='entidad.nombre', read_only=True)
+    viaje_detalle = ViajeSerializer(source='viaje', read_only=True)
     class Meta:
-        model = Gestor
-        fields = ['id', 'entidad', 'entidad_nombre', 'username', 'password', 'telefono',
-                  'notificaciones_email', 'notificaciones_push']
-
-    def create(self, validated_data):
-        username = validated_data.pop('username')
-        password = validated_data.pop('password')
-        user = User.objects.create_user(username=username, password=password)
-        return Gestor.objects.create(user=user, **validated_data)
+        model = Promocion
+        fields = '__all__'
